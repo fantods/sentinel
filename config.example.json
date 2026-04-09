@@ -1,6 +1,6 @@
 {
   "listen_addr": ":8080",
-  "upstream_base_url": "https://api.openai.com",
+  "upstream_base_url": "https://api.z.ai/api/paas/v4",
   "upstream_api_key": "",
   "api_keys": {
     "sk-your-gateway-key-1": "tenant-a",

@@ -32,7 +32,7 @@ type Config struct {
 func Default() *Config {
 	return &Config{
 		ListenAddr:        ":8080",
-		UpstreamBaseURL:   "https://api.openai.com",
+		UpstreamBaseURL:   "https://api.z.ai/api/paas/v4",
 		APIKeys:           make(map[string]string),
 		RateLimitRPS:      10,
 		LogLevel:          "info",

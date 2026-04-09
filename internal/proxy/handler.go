@@ -76,13 +76,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		streamTel = telemetry.NewStreamTelemetry(req.Model, provider)
 	}
 
-	upstreamReq, err := http.NewRequestWithContext(r.Context(), http.MethodPost, h.upstreamURL+r.URL.Path, bytes.NewReader(body))
+	upstreamPath := stripVersionPrefix(r.URL.Path)
+
+	upstreamReq, err := http.NewRequestWithContext(r.Context(), http.MethodPost, h.upstreamURL+upstreamPath, bytes.NewReader(body))
 	if err != nil {
 		h.logger.Error("failed to create upstream request", "error", err)
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	h.logger.Info("forwarding to upstream", "url", h.upstreamURL+r.URL.Path, "has_api_key", h.upstreamAPIKey != "")
+	h.logger.Info("forwarding to upstream", "url", h.upstreamURL+upstreamPath, "has_api_key", h.upstreamAPIKey != "")
 
 	for key, values := range r.Header {
 		if strings.EqualFold(key, "Host") || strings.EqualFold(key, "Authorization") {
@@ -267,7 +269,7 @@ func writeOpenAIError(w http.ResponseWriter, status int, errType, message string
 }
 
 func extractProvider(upstreamURL string) string {
-	if strings.Contains(upstreamURL, "bigmodel") {
+	if strings.Contains(upstreamURL, "bigmodel") || strings.Contains(upstreamURL, "z.ai") {
 		return "zhipu"
 	}
 	if strings.Contains(upstreamURL, "anthropic") {
@@ -276,25 +278,34 @@ func extractProvider(upstreamURL string) string {
 	return "openai"
 }
 
+func stripVersionPrefix(path string) string {
+	if len(path) >= 4 && path[0] == '/' && path[1] == 'v' && path[3] == '/' {
+		return path[3:]
+	}
+	return path
+}
+
 var nonRetryableCodes = []string{
 	"insufficient_quota",
 	"invalid_api_key",
 	"model_not_found",
 	"context_length_exceeded",
 	"content_policy_violation",
+	"1113",
 }
 
 func isNonRetryableError(body []byte) bool {
 	var errResp struct {
 		Error struct {
-			Code string `json:"code"`
+			Code interface{} `json:"code"`
 		} `json:"error"`
 	}
 	if json.Unmarshal(body, &errResp) != nil {
 		return false
 	}
-	for _, code := range nonRetryableCodes {
-		if errResp.Error.Code == code {
+	code := fmt.Sprintf("%v", errResp.Error.Code)
+	for _, c := range nonRetryableCodes {
+		if code == c {
 			return true
 		}
 	}
