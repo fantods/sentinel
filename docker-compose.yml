@@ -12,6 +12,13 @@ services:
     depends_on:
       - prometheus
 
+  demo:
+    build:
+      context: .
+      dockerfile: Dockerfile.demo
+    ports:
+      - "9999:9999"
+
   prometheus:
     image: prom/prometheus:v2.51.0
     ports:

@@ -4,6 +4,11 @@ Sentinel is a transparent proxy for OpenAI-compatible LLM APIs. It sits between 
 
 Currently configured to proxy through [Z.AI (Zhipu)](https://docs.z.ai/api-reference/llm/chat-completion).
 
+<p align="center">
+  <img src="media/dashboard1.png" alt="Request volume and latency dashboard" width="100%" />
+  <img src="media/dashboard2.png" alt="Cost analytics and token metrics dashboard" width="100%" />
+</p>
+
 ## Quick Start
 
 ### 1. Start Sentinel
@@ -24,7 +29,7 @@ Sentinel listens on `:8080` and accepts OpenAI-compatible requests under `/v1/`.
 ```bash
 OPENAI_BASE_URL=http://localhost:8080/v1 \
 OPENAI_API_KEY=sk-gateway-key-1 \
-codex
+codex --model glm-4.7-flash
 ```
 
 #### curl
@@ -33,14 +38,18 @@ codex
 curl http://localhost:8080/v1/chat/completions \
   -H "Authorization: Bearer sk-gateway-key-1" \
   -H "Content-Type: application/json" \
-  -d '{"model":"glm-4.6","stream":true,"messages":[{"role":"user","content":"Hello"}]}'
+  -d '{"model":"glm-4.7-flash","stream":true,"messages":[{"role":"user","content":"Hello"}]}'
 ```
+
+> **Tip:** `glm-4.7-flash` and `glm-4.5-flash` are free on Z.AI — no credits required. Paid models like `glm-5.1`, `glm-4.7`, and `glm-4.6` require account balance. See [Z.AI pricing](https://docs.z.ai/guides/overview/pricing) for details.
 
 ### 3. Observe
 
 - **Health**: `GET http://localhost:8080/health`
 - **Prometheus**: `http://localhost:9090/metrics`
 - **Grafana**: `http://localhost:3000` (admin/admin)
+
+
 
 ## Switching Providers
 

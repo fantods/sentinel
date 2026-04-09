@@ -178,28 +178,30 @@
     },
     {
       "title": "TTFT Distribution",
-      "type": "heatmap",
+      "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 },
       "targets": [
         {
-          "expr": "sum(rate(llm_ttft_seconds_bucket[$__rate_interval])) by (le)",
+          "expr": "histogram_quantile(0.5, sum(rate(llm_ttft_seconds_bucket[$__rate_interval])) by (le))",
+          "legendFormat": "p50",
           "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.9, sum(rate(llm_ttft_seconds_bucket[$__rate_interval])) by (le))",
+          "legendFormat": "p90",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(llm_ttft_seconds_bucket[$__rate_interval])) by (le))",
+          "legendFormat": "p99",
+          "refId": "C"
         }
       ],
-      "options": {
-        "calculate": false,
-        "cellGap": 2,
-        "cellValues": {},
-        "color": { "exponent": 0.5, "fill": "dark-orange", "mode": "scheme", "reverse": false, "scale": "exponential", "scheme": "Oranges", "steps": 64 },
-        "exemplars": { "color": "rgba(255,0,255,0.7)" },
-        "filterValues": { "le": 1e-9 },
-        "legend": { "show": true },
-        "rowsFrame": { "layout": "auto" },
-        "tooltip": { "show": true, "yHistogram": false },
-        "yAxis": { "decimals": 2, "unit": "s" }
-      },
       "fieldConfig": {
-        "defaults": { "custom": { "hideFrom": { "legend": false, "tooltip": false, "viz": false } } }
+        "defaults": {
+          "unit": "s",
+          "custom": { "drawStyle": "line", "fillOpacity": 10, "lineWidth": 2 }
+        }
       }
     },
     {

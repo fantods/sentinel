@@ -8,3 +8,9 @@ scrape_configs:
       - targets: ["sentinel:8080"]
     metrics_path: /metrics
     scrape_interval: 5s
+
+  - job_name: "demo"
+    static_configs:
+      - targets: ["demo:9999"]
+    metrics_path: /metrics
+    scrape_interval: 5s
