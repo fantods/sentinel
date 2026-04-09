@@ -183,7 +183,7 @@ Order matters:
 
 ---
 
-## Phase 3 — OpenTelemetry + Grafana Dashboard (PRIMARY FOCUS)
+## Phase 3 — OpenTelemetry + Grafana Dashboard
 
 **Goal:** LLM-specific observability with zero-impact on request latency. Pre-built Grafana dashboard deployed as code.
 

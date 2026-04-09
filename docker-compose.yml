@@ -1,0 +1,43 @@
+services:
+  sentinel:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - SENTINEL_UPSTREAM_BASE_URL=https://api.openai.com
+      - SENTINEL_API_KEYS={"sk-gateway-key-1":"tenant-a","sk-gateway-key-2":"tenant-b"}
+      - SENTINEL_RATE_LIMIT_RPS=10
+      - SENTINEL_LOG_LEVEL=info
+    depends_on:
+      - prometheus
+
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=30d"
+
+  grafana:
+    image: grafana/grafana:10.4.0
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+
+volumes:
+  prometheus-data:
+  grafana-data:
