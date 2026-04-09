@@ -10,25 +10,12 @@ import (
 	"go.opentelemetry.io/otel/metric"
 )
 
-type streamCtxKey struct{}
-
 type TelemetryMiddleware struct {
 	instruments *Instruments
 }
 
 func NewTelemetryMiddleware(instruments *Instruments) *TelemetryMiddleware {
 	return &TelemetryMiddleware{instruments: instruments}
-}
-
-func ContextWithStreamTelemetry(ctx context.Context, st *StreamTelemetry) context.Context {
-	return context.WithValue(ctx, streamCtxKey{}, st)
-}
-
-func StreamTelemetryFromContext(ctx context.Context) *StreamTelemetry {
-	if st, ok := ctx.Value(streamCtxKey{}).(*StreamTelemetry); ok {
-		return st
-	}
-	return nil
 }
 
 type statusWriter struct {
@@ -68,16 +55,10 @@ func (tm *TelemetryMiddleware) Wrap(next http.Handler) http.Handler {
 		tm.instruments.ActiveRequests.Add(ctx, -1,
 			metric.WithAttributes(attribute.String("tenant", tenant)),
 		)
-
-		st := StreamTelemetryFromContext(ctx)
-		if st != nil {
-			st.Tenant = tenant
-			tm.recordStream(st, sw.statusCode)
-		}
 	})
 }
 
-func (tm *TelemetryMiddleware) recordStream(st *StreamTelemetry, statusCode int) {
+func RecordStream(instruments *Instruments, st *StreamTelemetry, statusCode int) {
 	ctx := context.Background()
 
 	status := "success"
@@ -91,11 +72,11 @@ func (tm *TelemetryMiddleware) recordStream(st *StreamTelemetry, statusCode int)
 		attribute.String("status", status),
 	)
 
-	tm.instruments.RequestDuration.Record(ctx, st.Duration(), reqAttrs)
-	tm.instruments.RequestsTotal.Add(ctx, 1, reqAttrs)
+	instruments.RequestDuration.Record(ctx, st.Duration(), reqAttrs)
+	instruments.RequestsTotal.Add(ctx, 1, reqAttrs)
 
 	if ttft := st.TTFT(); ttft > 0 {
-		tm.instruments.TTFT.Record(ctx, ttft,
+		instruments.TTFT.Record(ctx, ttft,
 			metric.WithAttributes(
 				attribute.String("model", st.Model),
 				attribute.String("provider", st.Provider),
@@ -104,7 +85,7 @@ func (tm *TelemetryMiddleware) recordStream(st *StreamTelemetry, statusCode int)
 	}
 
 	if tps := st.TPS(); tps > 0 {
-		tm.instruments.TPS.Record(ctx, tps,
+		instruments.TPS.Record(ctx, tps,
 			metric.WithAttributes(
 				attribute.String("model", st.Model),
 				attribute.String("provider", st.Provider),
@@ -113,7 +94,7 @@ func (tm *TelemetryMiddleware) recordStream(st *StreamTelemetry, statusCode int)
 	}
 
 	if st.InputTokens > 0 {
-		tm.instruments.TokensTotal.Add(ctx, int64(st.InputTokens),
+		instruments.TokensTotal.Add(ctx, int64(st.InputTokens),
 			metric.WithAttributes(
 				attribute.String("model", st.Model),
 				attribute.String("type", "input"),
@@ -122,7 +103,7 @@ func (tm *TelemetryMiddleware) recordStream(st *StreamTelemetry, statusCode int)
 	}
 
 	if st.OutputTokens > 0 {
-		tm.instruments.TokensTotal.Add(ctx, int64(st.OutputTokens),
+		instruments.TokensTotal.Add(ctx, int64(st.OutputTokens),
 			metric.WithAttributes(
 				attribute.String("model", st.Model),
 				attribute.String("type", "output"),
@@ -132,7 +113,7 @@ func (tm *TelemetryMiddleware) recordStream(st *StreamTelemetry, statusCode int)
 
 	cost := pricing.CalculateCost(st.Model, st.InputTokens, st.OutputTokens)
 	if cost > 0 {
-		tm.instruments.CostDollars.Add(ctx, cost,
+		instruments.CostDollars.Add(ctx, cost,
 			metric.WithAttributes(
 				attribute.String("model", st.Model),
 				attribute.String("tenant", st.Tenant),

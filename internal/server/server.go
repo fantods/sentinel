@@ -37,7 +37,7 @@ func New(cfg *config.Config, logger *slog.Logger) (*Server, error) {
 	}
 
 	keyStore := auth.NewKeyStore(cfg.APIKeys)
-	proxyHandler := proxy.NewHandler(cfg.UpstreamBaseURL, cfg.MaxRetries, cfg.RetryBaseDelay, logger, tel)
+	proxyHandler := proxy.NewHandler(cfg.UpstreamBaseURL, cfg.UpstreamAPIKey, cfg.MaxRetries, cfg.RetryBaseDelay, logger, tel)
 	rateLimiter := middleware.NewRateLimiter(cfg.RateLimitRPS)
 
 	mux := http.NewServeMux()
@@ -55,6 +55,7 @@ func New(cfg *config.Config, logger *slog.Logger) (*Server, error) {
 		),
 	)
 	mux.Handle("/v1/", proxyChain)
+	mux.Handle("/v4/", proxyChain)
 
 	if cfg.TelemetryEnabled && tel != nil {
 		mux.Handle(cfg.TelemetryPath, tel.Handler())

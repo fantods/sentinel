@@ -11,6 +11,7 @@ import (
 type Config struct {
 	ListenAddr        string            `yaml:"listen_addr" json:"listen_addr"`
 	UpstreamBaseURL   string            `yaml:"upstream_base_url" json:"upstream_base_url"`
+	UpstreamAPIKey    string            `yaml:"upstream_api_key" json:"upstream_api_key"`
 	APIKeys           map[string]string `yaml:"api_keys" json:"api_keys"`
 	RateLimitRPS      float64           `yaml:"rate_limit_rps" json:"rate_limit_rps"`
 	LogLevel          string            `yaml:"log_level" json:"log_level"`
@@ -81,6 +82,9 @@ func Load() (*Config, error) {
 	}
 	if v := os.Getenv("SENTINEL_LOG_LEVEL"); v != "" {
 		cfg.LogLevel = v
+	}
+	if v := os.Getenv("SENTINEL_UPSTREAM_API_KEY"); v != "" {
+		cfg.UpstreamAPIKey = v
 	}
 
 	if len(cfg.APIKeys) == 0 {

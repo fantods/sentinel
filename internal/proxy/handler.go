@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mattemmons/sentinel/internal/middleware"
 	"github.com/mattemmons/sentinel/internal/telemetry"
 )
 
@@ -24,17 +25,19 @@ type chatRequest struct {
 }
 
 type Handler struct {
-	upstreamURL string
-	client      *http.Client
-	maxRetries  int
-	retryDelay  time.Duration
-	logger      *slog.Logger
-	tel         *telemetry.Manager
+	upstreamURL    string
+	upstreamAPIKey string
+	client         *http.Client
+	maxRetries     int
+	retryDelay     time.Duration
+	logger         *slog.Logger
+	tel            *telemetry.Manager
 }
 
-func NewHandler(upstreamURL string, maxRetries int, retryDelay time.Duration, logger *slog.Logger, tel *telemetry.Manager) *Handler {
+func NewHandler(upstreamURL, upstreamAPIKey string, maxRetries int, retryDelay time.Duration, logger *slog.Logger, tel *telemetry.Manager) *Handler {
 	return &Handler{
-		upstreamURL: upstreamURL,
+		upstreamURL:    upstreamURL,
+		upstreamAPIKey: upstreamAPIKey,
 		client: &http.Client{
 			Timeout: 0,
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -66,11 +69,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	h.logger.Info("proxying request", "model", req.Model, "stream", req.Stream, "path", r.URL.Path)
 
+	provider := extractProvider(h.upstreamURL)
+
 	var streamTel *telemetry.StreamTelemetry
 	if h.tel != nil {
-		streamTel = telemetry.NewStreamTelemetry(req.Model, "openai")
-		ctx := telemetry.ContextWithStreamTelemetry(r.Context(), streamTel)
-		r = r.WithContext(ctx)
+		streamTel = telemetry.NewStreamTelemetry(req.Model, provider)
 	}
 
 	upstreamReq, err := http.NewRequestWithContext(r.Context(), http.MethodPost, h.upstreamURL+r.URL.Path, bytes.NewReader(body))
@@ -79,13 +82,22 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+	h.logger.Info("forwarding to upstream", "url", h.upstreamURL+r.URL.Path, "has_api_key", h.upstreamAPIKey != "")
 
 	for key, values := range r.Header {
-		if strings.EqualFold(key, "Host") {
+		if strings.EqualFold(key, "Host") || strings.EqualFold(key, "Authorization") {
 			continue
 		}
 		for _, v := range values {
 			upstreamReq.Header.Add(key, v)
+		}
+	}
+
+	if h.upstreamAPIKey != "" {
+		upstreamReq.Header.Set("Authorization", "Bearer "+h.upstreamAPIKey)
+	} else {
+		for _, v := range r.Header.Values("Authorization") {
+			upstreamReq.Header.Add("Authorization", v)
 		}
 	}
 
@@ -112,14 +124,29 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if resp.StatusCode == http.StatusTooManyRequests {
+			errBody, _ := io.ReadAll(resp.Body)
 			resp.Body.Close()
-			h.logger.Info("upstream rate limited, retrying", "attempt", attempt, "model", req.Model)
+			if isNonRetryableError(errBody) {
+				h.logger.Warn("upstream non-retryable error", "model", req.Model, "body", string(errBody))
+				lastErr = fmt.Errorf("upstream non-retryable error: %s", string(errBody))
+				break
+			}
+			h.logger.Warn("upstream rate limited", "attempt", attempt, "model", req.Model, "body", string(errBody))
+			if attempt == h.maxRetries {
+				lastErr = fmt.Errorf("upstream rate limited after %d retries", h.maxRetries)
+				break
+			}
 			continue
 		}
 
 		if resp.StatusCode >= 500 {
+			errBody, _ := io.ReadAll(resp.Body)
 			resp.Body.Close()
-			h.logger.Warn("upstream server error", "status", resp.StatusCode, "attempt", attempt, "model", req.Model)
+			h.logger.Warn("upstream server error", "status", resp.StatusCode, "attempt", attempt, "model", req.Model, "body", string(errBody))
+			if attempt == h.maxRetries {
+				lastErr = fmt.Errorf("upstream server error %d after %d retries", resp.StatusCode, h.maxRetries)
+				break
+			}
 			continue
 		}
 
@@ -144,10 +171,46 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(resp.StatusCode)
 
 	contentType := resp.Header.Get("Content-Type")
-	if strings.Contains(contentType, "text/event-stream") {
+	h.logger.Debug("upstream response", "status", resp.StatusCode, "content_type", contentType, "model", req.Model)
+
+	isSSE := strings.Contains(contentType, "text/event-stream") || (req.Stream && resp.StatusCode == 200)
+	if isSSE {
 		h.streamSSE(w, resp.Body, streamTel, req.Model)
 	} else {
-		io.Copy(w, resp.Body)
+		respBody, _ := io.ReadAll(resp.Body)
+		w.Write(respBody)
+
+		if streamTel != nil {
+			var chatResp struct {
+				Usage *struct {
+					PromptTokens     int `json:"prompt_tokens"`
+					CompletionTokens int `json:"completion_tokens"`
+				} `json:"usage"`
+			}
+			if json.Unmarshal(respBody, &chatResp) == nil && chatResp.Usage != nil {
+				streamTel.InputTokens = chatResp.Usage.PromptTokens
+				streamTel.OutputTokens = chatResp.Usage.CompletionTokens
+			}
+		}
+	}
+
+	if streamTel != nil && h.tel != nil {
+		streamTel.Tenant = middleware.TenantFromContext(r.Context())
+		telemetry.RecordStream(h.tel.Instruments(), streamTel, resp.StatusCode)
+		h.logger.Info("request completed",
+			"model", req.Model,
+			"stream", req.Stream,
+			"status", resp.StatusCode,
+			"ttft_ms", streamTel.TTFT()*1000,
+			"output_tokens", streamTel.OutputTokens,
+			"input_tokens", streamTel.InputTokens,
+			"tps", streamTel.TPS(),
+			"duration_ms", streamTel.Duration()*1000,
+		)
+	} else if resp.StatusCode >= 400 && h.tel != nil {
+		st := telemetry.NewStreamTelemetry(req.Model, provider)
+		st.Tenant = middleware.TenantFromContext(r.Context())
+		telemetry.RecordStream(h.tel.Instruments(), st, resp.StatusCode)
 	}
 }
 
@@ -171,7 +234,7 @@ func (h *Handler) streamSSE(w http.ResponseWriter, body io.Reader, streamTel *te
 
 		fmt.Fprintf(w, "%s\n", line)
 
-		if line == "" {
+		if line == "" || strings.HasPrefix(line, "data:") {
 			flusher.Flush()
 		}
 	}
@@ -201,4 +264,39 @@ func writeOpenAIError(w http.ResponseWriter, status int, errType, message string
 			"code":    status,
 		},
 	})
+}
+
+func extractProvider(upstreamURL string) string {
+	if strings.Contains(upstreamURL, "bigmodel") {
+		return "zhipu"
+	}
+	if strings.Contains(upstreamURL, "anthropic") {
+		return "anthropic"
+	}
+	return "openai"
+}
+
+var nonRetryableCodes = []string{
+	"insufficient_quota",
+	"invalid_api_key",
+	"model_not_found",
+	"context_length_exceeded",
+	"content_policy_violation",
+}
+
+func isNonRetryableError(body []byte) bool {
+	var errResp struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(body, &errResp) != nil {
+		return false
+	}
+	for _, code := range nonRetryableCodes {
+		if errResp.Error.Code == code {
+			return true
+		}
+	}
+	return false
 }

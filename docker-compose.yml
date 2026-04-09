@@ -5,6 +5,7 @@ services:
       - "8080:8080"
     environment:
       - SENTINEL_UPSTREAM_BASE_URL=https://api.openai.com
+      - SENTINEL_UPSTREAM_API_KEY=${OPENAI_API_KEY}
       - SENTINEL_API_KEYS={"sk-gateway-key-1":"tenant-a","sk-gateway-key-2":"tenant-b"}
       - SENTINEL_RATE_LIMIT_RPS=10
       - SENTINEL_LOG_LEVEL=info
